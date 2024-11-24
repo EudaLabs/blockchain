@@ -1,6 +1,6 @@
 # MyToken Smart Contract
 
-A comprehensive ERC20 token implementation with advanced features for security, trading control, and reward distribution.
+A comprehensive ERC20 token implementation with advanced features for security, trading control, reward distribution, and DEX integration.
 
 ## Features
 
@@ -37,24 +37,37 @@ A comprehensive ERC20 token implementation with advanced features for security, 
   - 40% treasury
   - 20% rewards
 
-### Liquidity Management
+### DEX Integration
+- PancakeSwap integration
+- Liquidity locking mechanism
 - Auto-liquidity generation
-- Liquidity locking
-- Minimum threshold for liquidity adds
+- Price impact monitoring
+- Trading volume tracking
+- Anti-manipulation measures
 
 ### Analytics & Tracking
 - Trade history tracking
 - Volume tracking
 - Holder tracking
 - Price impact monitoring
+- Daily statistics
+- User trade counts
 
 ## Contract Functions
 
 ### Core Functions
-- `constructor(uint256 _maxSupply, address _treasuryWallet)`
+- `constructor(uint256 _maxSupply, address _treasuryWallet, address _routerAddress)`
 - `_transfer(address sender, address recipient, uint256 amount)`
 - `_calculateFee(address sender, address recipient, uint256 amount)`
 - `_handleFees(address sender, uint256 fee)`
+
+### DEX Integration Functions
+- `lockLiquidity(uint256 amount, uint256 duration)`
+- `unlockLiquidity(uint256 lockIndex)`
+- `calculatePriceImpact(uint256 amount, bool isSell)`
+- `addLiquidity()`
+- `setLiquidityPool(address _pool)`
+- `setAutoLiquidity(bool _enabled)`
 
 ### Trading Control Functions
 - `enableTrading()`
@@ -62,34 +75,20 @@ A comprehensive ERC20 token implementation with advanced features for security, 
 - `setFees(uint256 _buyFee, uint256 _sellFee)`
 - `setLimits(uint256 _maxTx, uint256 _maxWallet, uint256 _maxSell)`
 
-### Multi-Signature Functions
-- `addSigner(address _signer)`
-- `removeSigner(address _signer)`
-- `createOperation(bytes32 operationType, bytes memory data)`
-- `signOperation(bytes32 operationId)`
-- `executeOperation(bytes32 operationId)`
-- `cancelOperation(bytes32 operationId)`
-
-### Reward System Functions
-- `claimRewards()`
-- `_calculateTotalPoints()`
-- `_addHolder(address holder)`
-- `_removeHolder(address holder)`
-
-### View Functions
-- `getTokenomics()`
-- `getLimits()`
+### Analytics Functions
 - `getTradeHistory(address trader, uint256 limit)`
 - `getDailyVolume(uint256 numberOfDays)`
-- `getOperationInfo(bytes32 operationId)`
-- `getHolderCount()`
+- `getLiquidityLocks(address user)`
+- `getTokenomics()`
+- `getLimits()`
 
 ## Test Coverage
 
-### Deployment Tests
-- Initial parameters
-- Token distribution
-- Initial limits
+### DEX Integration Tests
+- Liquidity locking/unlocking
+- Price impact calculation
+- Auto-liquidity generation
+- Trading volume tracking
 
 ### Trading Control Tests
 - Trading enablement
@@ -108,99 +107,6 @@ A comprehensive ERC20 token implementation with advanced features for security, 
 - Blacklist functionality
 - Emergency pause/unpause
 - Multi-signature operations
-
-### Reward System Tests
-- Point accumulation
-- Reward distribution
-- Reward claiming
-- Holder tracking
-
-### Analytics Tests
-- Trade history recording
-- Volume tracking
-- Daily statistics
-- Holder management
-
-## Usage Example
-
-```javascript
-// Deploy contract
-const MyToken = await ethers.getContractFactory("MyToken");
-const myToken = await MyToken.deploy(
-    ethers.utils.parseEther("1000000"), // 1 million max supply
-    treasuryWallet.address
-);
-
-// Enable trading
-await myToken.enableTrading();
-
-// Set up DEX pair
-await myToken.setDexPair(pairAddress, true);
-
-// Configure fees
-await myToken.setFees(30, 80); // 3% buy, 8% sell
-
-// Set limits
-await myToken.setLimits(
-    maxTxAmount,
-    maxWalletAmount,
-    maxSellAmount
-);
-```
-
-## Security Considerations
-
-1. **Flash Loan Protection**
-   - Same-block transaction detection
-   - Higher fees for rapid trades
-
-2. **Anti-Bot Measures**
-   - Initial trading restrictions
-   - Transaction amount limits
-   - Gas price checks
-
-3. **Multi-Signature Security**
-   - Multiple signatures required
-   - Time-locked operations
-   - Operation cancellation
-
-4. **Emergency Controls**
-   - Emergency pause
-   - Blacklist functionality
-   - Trading restrictions
-
-## Gas Optimization
-
-1. **Storage Optimization**
-   - Packed storage variables
-   - Minimal state changes
-   - Efficient mappings
-
-2. **Computation Efficiency**
-   - Cached variables
-   - Optimized loops
-   - Minimal redundant calculations
-
-## Events
-
-- `TradingEnabled(uint256 timestamp)`
-- `TokensBurned(address indexed from, uint256 amount)`
-- `RewardsDistributed(uint256 amount)`
-- `RewardsClaimed(address indexed user, uint256 amount)`
-- `DexPairUpdated(address indexed pair, bool status)`
-- `FeesUpdated(uint256 buyFee, uint256 sellFee)`
-- `LimitsUpdated(uint256 maxTx, uint256 maxWallet, uint256 maxSell)`
-- `OperationCreated(bytes32 indexed operationId, address indexed creator, bytes data)`
-- `OperationExecuted(bytes32 indexed operationId)`
-- `BlacklistUpdated(address indexed account, bool status)`
-
-## Dependencies
-
-- OpenZeppelin Contracts v4.9.0
-  - ERC20
-  - Ownable
-  - Pausable
-  - ReentrancyGuard
 
 ## Development Setup
 
@@ -223,6 +129,79 @@ npx hardhat test
 ```bash
 npx hardhat run scripts/deploy.js --network <network>
 ```
+
+## Security Considerations
+
+1. **DEX Integration**
+   - Price impact limits
+   - Liquidity lock timeouts
+   - Anti-manipulation checks
+
+2. **Flash Loan Protection**
+   - Same-block transaction detection
+   - Higher fees for rapid trades
+
+3. **Anti-Bot Measures**
+   - Initial trading restrictions
+   - Transaction amount limits
+   - Gas price checks
+
+4. **Multi-Signature Security**
+   - Multiple signatures required
+   - Time-locked operations
+   - Operation cancellation
+
+## Gas Optimization
+
+1. **Storage Optimization**
+   - Packed storage variables
+   - Minimal state changes
+   - Efficient mappings
+
+2. **Computation Efficiency**
+   - Cached variables
+   - Optimized loops
+   - Minimal redundant calculations
+
+## Dependencies
+
+- OpenZeppelin Contracts v4.9.0
+  - ERC20
+  - Ownable
+  - Pausable
+  - ReentrancyGuard
+
+## Networks
+
+### BSC Testnet
+- Network Name: BSC Testnet
+- RPC URL: https://data-seed-prebsc-1-s1.binance.org:8545
+- Chain ID: 97
+- Currency Symbol: tBNB
+
+### BSC Mainnet
+- Network Name: BSC Mainnet
+- RPC URL: https://bsc-dataseed.binance.org/
+- Chain ID: 56
+- Currency Symbol: BNB
+
+## Environment Setup
+
+Create a `.env` file with:
+```plaintext
+PRIVATE_KEY=your_private_key_here
+BSCSCAN_API_KEY=your_bscscan_api_key_here
+COINMARKETCAP_API_KEY=your_coinmarketcap_api_key_here
+```
+
+## Scripts
+
+- `npm run test` - Run tests
+- `npm run compile` - Compile contracts
+- `npm run deploy:testnet` - Deploy to BSC testnet
+- `npm run deploy:mainnet` - Deploy to BSC mainnet
+- `npm run verify` - Verify contract on BSCScan
+- `npm run coverage` - Generate test coverage report
 
 ## License
 
