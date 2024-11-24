@@ -5,6 +5,9 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "./interfaces/IPancakeRouter02.sol";
+import "./interfaces/IPancakePair.sol";
+import "./interfaces/IPancakeFactory.sol";
 
 contract MyToken is ERC20, Ownable, Pausable, ReentrancyGuard {
     // Constants
@@ -51,6 +54,16 @@ contract MyToken is ERC20, Ownable, Pausable, ReentrancyGuard {
     event DexPairUpdated(address indexed pair, bool status);
     event FeesUpdated(uint256 buyFee, uint256 sellFee);
     event LimitsUpdated(uint256 maxTx, uint256 maxWallet, uint256 maxSell);
+    event VolumeUpdated(uint256 newVolume);
+    event DynamicFeeUpdated(uint256 multiplier);
+    event LiquidityAdded(uint256 tokenAmount, uint256 bnbAmount);
+    event TradeExecuted(address indexed trader, bool isBuy, uint256 amount, uint256 price);
+    event LiquidityLocked(address indexed user, uint256 amount, uint256 unlockTime);
+    event LiquidityUnlocked(address indexed user, uint256 amount);
+    event HighPriceImpact(uint256 impact, uint256 maxAllowed);
+    event OperationCreated(bytes32 indexed operationId, address indexed creator, bytes data);
+    event OperationCancelled(bytes32 indexed operationId);
+    event BlacklistUpdated(address indexed account, bool status);
     
     // Multi-signature related
     uint256 public constant REQUIRED_SIGNATURES = 2;
@@ -103,23 +116,34 @@ contract MyToken is ERC20, Ownable, Pausable, ReentrancyGuard {
     mapping(uint256 => uint256) public dailyVolume; // day => volume
     mapping(address => uint256) public userTradeCount;
 
-    // Events
-    event DynamicFeeUpdated(uint256 multiplier);
-    event LiquidityAdded(uint256 tokenAmount, uint256 bnbAmount);
-    event TradeExecuted(
-        address indexed trader,
-        bool isBuy,
-        uint256 amount,
-        uint256 price
-    );
-    event VolumeUpdated(uint256 newVolume);
-
+    IPancakeRouter02 public pancakeRouter;
+    IPancakePair public pancakePair;
+    
+    // Liquidity locking
+    struct LockInfo {
+        uint256 amount;
+        uint256 unlockTime;
+        bool claimed;
+    }
+    
+    mapping(address => LockInfo[]) public liquidityLocks;
+    uint256 public constant MIN_LOCK_DURATION = 30 days;
+    uint256 public constant MAX_LOCK_DURATION = 365 days;
+    uint256 public totalLockedLiquidity;
+    
+    // Price impact
+    uint256 public constant MAX_PRICE_IMPACT = 50; // 5%
+    uint256 public constant PRICE_IMPACT_DENOMINATOR = 1000;
+    
     constructor(
         uint256 _maxSupply,
-        address _treasuryWallet
+        address _treasuryWallet,
+        address _routerAddress
     ) ERC20("MyToken", "MTK") {
         require(_maxSupply > 0, "Max supply must be positive");
         require(_treasuryWallet != address(0), "Invalid treasury wallet");
+        require(_routerAddress != address(0), "Invalid router");
+        pancakeRouter = IPancakeRouter02(_routerAddress);
         
         maxSupply = _maxSupply;
         treasuryWallet = _treasuryWallet;
@@ -216,6 +240,16 @@ contract MyToken is ERC20, Ownable, Pausable, ReentrancyGuard {
         _addHolder(recipient);
         if (balanceOf(sender) == 0) {
             _removeHolder(sender);
+        }
+
+        // Add price impact check for DEX trades
+        if (isDexPair[sender] || isDexPair[recipient]) {
+            uint256 priceImpact = calculatePriceImpact(amount, isDexPair[recipient]);
+            require(priceImpact <= MAX_PRICE_IMPACT, "Price impact too high");
+            
+            if (priceImpact > MAX_PRICE_IMPACT / 2) {
+                emit HighPriceImpact(priceImpact, MAX_PRICE_IMPACT);
+            }
         }
     }
 
@@ -442,11 +476,7 @@ contract MyToken is ERC20, Ownable, Pausable, ReentrancyGuard {
     }
 
     mapping(bytes32 => Operation) public operations;
-
-    event OperationCreated(bytes32 indexed operationId, address indexed creator, bytes data);
-    event OperationCancelled(bytes32 indexed operationId);
-    event BlacklistUpdated(address indexed account, bool status);
-
+    
     function createOperation(bytes32 operationType, bytes memory data) external {
         require(isSigner[msg.sender], "Not authorized");
         bytes32 operationId = keccak256(abi.encodePacked(operationType, data, block.timestamp));
@@ -676,5 +706,89 @@ contract MyToken is ERC20, Ownable, Pausable, ReentrancyGuard {
     // Add view function for holder count
     function getHolderCount() external view returns (uint256) {
         return _holders.length;
+    }
+
+    // Add these functions for liquidity locking
+    function lockLiquidity(uint256 amount, uint256 duration) external nonReentrant {
+        require(amount > 0, "Amount must be positive");
+        require(duration >= MIN_LOCK_DURATION && duration <= MAX_LOCK_DURATION, "Invalid duration");
+        require(address(pancakePair) != address(0), "Pair not created");
+        
+        IPancakePair pair = IPancakePair(pancakePair);
+        require(pair.balanceOf(msg.sender) >= amount, "Insufficient LP tokens");
+        
+        // Transfer LP tokens to contract
+        require(pair.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        
+        // Create lock
+        liquidityLocks[msg.sender].push(LockInfo({
+            amount: amount,
+            unlockTime: block.timestamp + duration,
+            claimed: false
+        }));
+        
+        totalLockedLiquidity += amount;
+        emit LiquidityLocked(msg.sender, amount, block.timestamp + duration);
+    }
+    
+    function unlockLiquidity(uint256 lockIndex) external nonReentrant {
+        LockInfo[] storage userLocks = liquidityLocks[msg.sender];
+        require(lockIndex < userLocks.length, "Invalid lock index");
+        
+        LockInfo storage lock = userLocks[lockIndex];
+        require(!lock.claimed, "Already claimed");
+        require(block.timestamp >= lock.unlockTime, "Still locked");
+        
+        lock.claimed = true;
+        totalLockedLiquidity -= lock.amount;
+        
+        // Return LP tokens
+        require(IPancakePair(pancakePair).transfer(msg.sender, lock.amount), "Transfer failed");
+        emit LiquidityUnlocked(msg.sender, lock.amount);
+    }
+
+    // Add price impact monitoring
+    function calculatePriceImpact(uint256 amount, bool isSell) public view returns (uint256) {
+        require(address(pancakePair) != address(0), "Pair not created");
+        
+        IPancakePair pair = IPancakePair(pancakePair);
+        (uint112 reserve0, uint112 reserve1,) = pair.getReserves();
+        
+        // Ensure reserves are in correct order
+        (uint112 tokenReserve, uint112 bnbReserve) = pair.token0() == address(this) 
+            ? (reserve0, reserve1) 
+            : (reserve1, reserve0);
+        
+        uint256 amountAfterFee = amount * (FEE_DENOMINATOR - (isSell ? sellFee : buyFee)) / FEE_DENOMINATOR;
+        
+        if (isSell) {
+            // Calculate price impact for selling
+            return (amountAfterFee * PRICE_IMPACT_DENOMINATOR) / tokenReserve;
+        } else {
+            // Calculate price impact for buying
+            return (amountAfterFee * PRICE_IMPACT_DENOMINATOR) / bnbReserve;
+        }
+    }
+
+    // View functions for liquidity locks
+    function getLiquidityLocks(address user) external view returns (
+        uint256[] memory amounts,
+        uint256[] memory unlockTimes,
+        bool[] memory claimed
+    ) {
+        LockInfo[] storage locks = liquidityLocks[user];
+        uint256 length = locks.length;
+        
+        amounts = new uint256[](length);
+        unlockTimes = new uint256[](length);
+        claimed = new bool[](length);
+        
+        for (uint256 i = 0; i < length; i++) {
+            amounts[i] = locks[i].amount;
+            unlockTimes[i] = locks[i].unlockTime;
+            claimed[i] = locks[i].claimed;
+        }
+        
+        return (amounts, unlockTimes, claimed);
     }
 } 
