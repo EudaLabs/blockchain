@@ -9,7 +9,7 @@ This repository is a collection of blockchain technology projects developed and 
 
 This repository is shaped by the valuable contributions of our developers. Special thanks to:  
 
-- **@Batuhan4**  
+- **Batuhan4**  
   A passionate developer with expertise in blockchain and smart contracts, contributing to various projects in this repository and constantly innovating.
 
 ---
